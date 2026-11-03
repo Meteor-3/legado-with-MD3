@@ -6,7 +6,7 @@ on:
       branch:
         description: '要构建的分支'
         required: true
-        default: 'trae/solo-agent-vhkVM3'
+        default: 'fix/scroll-window-coverage'
       product:
         description: '产品变体：appCore 无本地引擎，appFull 内置本地 OCR/擦除/气泡检测'
         required: true
@@ -14,7 +14,16 @@ on:
         options:
           - appCore
           - appFull
-        default: appCore
+        default: appFull
+      abi:
+        description: '目标 ABI：只上传该 ABI 的 APK；universal 关闭 ABI 拆分出单包'
+        required: true
+        type: choice
+        options:
+          - arm64-v8a
+          - armeabi-v7a
+          - universal
+        default: arm64-v8a
 
 permissions:
   contents: write
@@ -25,6 +34,7 @@ jobs:
     env:
       PRODUCT: ${{ github.event.inputs.product }}
       PRODUCT_TAG: "${{ github.event.inputs.product == 'appFull' && 'full' || 'core' }}"
+      TARGET_ABI: ${{ github.event.inputs.abi }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
@@ -55,46 +65,41 @@ jobs:
           chmod +x gradlew
           # appCore -> AppCore：Gradle 变体任务名是驼峰形式
           PRODUCT_CAP=$(echo "$PRODUCT" | awk '{print toupper(substr($0,1,1)) substr($0,2)}')
-          ./gradlew assemble${PRODUCT_CAP}Debug -PenableAbiSplits=false --no-daemon --no-configuration-cache
+          if [ "$TARGET_ABI" = "universal" ]; then
+            ./gradlew assemble${PRODUCT_CAP}Debug -PenableAbiSplits=false --no-daemon --no-configuration-cache
+          else
+            # 保留 ABI 拆分，按目标 ABI 取包；debug 的 applicationIdSuffix=".debug"，
+            # 可以和 release 版本同时安装。
+            ./gradlew assemble${PRODUCT_CAP}Debug -PenableAbiSplits=true --no-daemon --no-configuration-cache
+          fi
         env:
           COMMIT_NUMBER: ${{ github.run_number }}
           APP_VERSION_NAME: debug-${{ github.run_number }}
 
-      - name: Check Build Output
+      - name: Collect target APK
         run: |
-          APK_PATH="$GITHUB_WORKSPACE/app/build/outputs/apk/${{ env.PRODUCT }}/debug"
-          echo "检查 APK 输出目录: $APK_PATH"
-          ls -la "$APK_PATH" || true
-          APK_COUNT=$(find "$APK_PATH" -maxdepth 1 -name "*.apk" | wc -l | tr -d ' ')
-          if [ "$APK_COUNT" -ne 1 ]; then
-            echo "预期生成 1 个 universal APK，实际生成 $APK_COUNT 个！"
+          APK_DIR="$GITHUB_WORKSPACE/app/build/outputs/apk/${PRODUCT}/debug"
+          echo "构建输出目录: $APK_DIR"
+          ls -la "$APK_DIR" || true
+          if [ "$TARGET_ABI" = "universal" ]; then
+            SRC=$(find "$APK_DIR" -maxdepth 1 -name "*.apk" | grep -i universal | head -n 1)
+          else
+            SRC=$(find "$APK_DIR" -maxdepth 1 -name "*.apk" | grep -i "$TARGET_ABI" | grep -vi universal | head -n 1)
+          fi
+          if [ -z "$SRC" ]; then
+            echo "找不到 $TARGET_ABI 的 APK"
             exit 1
           fi
+          OUT_DIR="$GITHUB_WORKSPACE/dist"
+          mkdir -p "$OUT_DIR"
+          NAME="legado-debug-${GITHUB_RUN_NUMBER}-${PRODUCT_TAG}-${TARGET_ABI}.apk"
+          cp "$SRC" "$OUT_DIR/$NAME"
+          echo "产物: $OUT_DIR/$NAME"
+          ls -la "$OUT_DIR"
 
-      - name: Rename APK Files
-        run: |
-          APK_PATH="$GITHUB_WORKSPACE/app/build/outputs/apk/${{ env.PRODUCT }}/debug"
-          cd "$APK_PATH"
-          mv -- *.apk "legado-debug-${GITHUB_RUN_NUMBER}-${PRODUCT_TAG}-universal.apk"
-          ls -la
-
-      - name: Create ZIP Archive
-        run: |
-          APK_PATH="$GITHUB_WORKSPACE/app/build/outputs/apk/${{ env.PRODUCT }}/debug"
-          ZIP_NAME="legado-debug-apks-${GITHUB_RUN_NUMBER}-${PRODUCT_TAG}.zip"
-          cd "$APK_PATH"
-          zip "$GITHUB_WORKSPACE/$ZIP_NAME" *.apk
-          echo "ZIP 文件已创建: $ZIP_NAME"
-          ls -la "$GITHUB_WORKSPACE/$ZIP_NAME"
-
-      - name: Upload APK Artifacts
+      - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: legado-apks-${{ env.PRODUCT_TAG }}-${{ github.run_number }}
-          path: app/build/outputs/apk/${{ env.PRODUCT }}/debug/*.apk
-
-      - name: Upload ZIP Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: legado-apks-zip-${{ env.PRODUCT_TAG }}-${{ github.run_number }}
-          path: legado-debug-apks-*.zip
+          name: legado-debug-${{ github.event.inputs.product == 'appFull' && 'full' || 'core' }}-${{ github.event.inputs.abi }}-${{ github.run_number }}
+          path: dist/*.apk
+          if-no-files-found: error
