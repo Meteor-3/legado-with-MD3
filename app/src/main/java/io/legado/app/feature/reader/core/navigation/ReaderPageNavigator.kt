@@ -38,8 +38,13 @@ object ReaderPageNavigator {
         pages: List<ReaderPage>,
         chapterIndex: Int,
         displayedChapterIndex: Int?,
+        /**
+         * 额外保留几章前向页。滚动模式下读者可能刚往后退过一章又滑回来，只保留 ±1 会把
+         * 下一章整章回收，回来时只剩"加载中"占位页，直到真正跨章才重排。
+         */
+        forwardExtra: Int = 0,
     ): List<ReaderPage> = pages.filter {
-        it.id.chapterIndex in chapterIndex - 1..chapterIndex + 1 ||
+        it.id.chapterIndex in chapterIndex - 1..chapterIndex + 1 + forwardExtra ||
                 it.id.chapterIndex == displayedChapterIndex
     }
 

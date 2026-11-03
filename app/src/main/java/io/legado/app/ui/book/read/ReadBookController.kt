@@ -1061,7 +1061,52 @@ class ReadBookController(
             position = ReaderPageNavigator.chapterPosition(directReaderPages, boundedIndex),
             pageContext = directReaderPageContext(boundedIndex),
         )
-        return updateReaderPageWindow(directReaderWindow(boundedIndex))
+        val window = updateReaderPageWindow(directReaderWindow(boundedIndex))
+        ensurePlaceholderChapterPagination(window)
+        return window
+    }
+
+    /**
+     * 窗口里出现邻章占位页时立刻补排该章。
+     *
+     * 只保留 ±1 章、且只在换章时调度邻章，会导致"退一章再滑回来"时下一章已经被回收，
+     * 窗口里只剩一张"加载中"占位页；滚动模式下半屏都是它，直到真正跨章才重排。
+     * 这里在占位页进入窗口时就发起该章排版，让真实页在它变成当前页之前准备好。
+     */
+    private fun ensurePlaceholderChapterPagination(window: ReaderPageWindow) {
+        if (directReaderPaginationEnvironmentKey == null) return
+        val currentChapterIndex = window.current?.id?.chapterIndex ?: return
+        val placeholderChapters = window.windowPages()
+            .asSequence()
+            .filter { it.isPlaceholder }
+            .map { it.id.chapterIndex }
+            .filter { it != currentChapterIndex }
+            .distinct()
+            .toList()
+        if (placeholderChapters.isEmpty()) return
+        val viewport = layoutController.viewport.value ?: return
+        if (viewport.widthPx <= 0 || viewport.heightPx <= 0) return
+        val inputWindow = ReadBook.readerChapterInputWindow
+        val inputs = listOfNotNull(inputWindow.previous, inputWindow.current, inputWindow.next)
+            .distinctBy { it.chapter.index }
+        val style = LegacyReaderPaginationStyleFactory.create()
+        val paginationGeneration = ReadBook.readerPaginationGeneration
+        placeholderChapters.forEach { chapterIndex ->
+            // 已经有真实页（批次刚落地）或该章任务还在跑就不再重复启动。
+            if (directReaderPages.any { it.id.chapterIndex == chapterIndex && !it.isPlaceholder }) {
+                return@forEach
+            }
+            if (readerChapterPaginationJobs[chapterIndex]?.job?.isActive == true) return@forEach
+            val candidate = inputs.firstOrNull { it.chapter.index == chapterIndex } ?: return@forEach
+            startReaderChapterPagination(
+                paginationGeneration = paginationGeneration,
+                candidate = candidate,
+                width = viewport.widthPx,
+                height = viewport.heightPx,
+                padding = viewport.contentPadding,
+                style = style,
+            )
+        }
     }
 
     /**
@@ -1521,7 +1566,10 @@ class ReadBookController(
 
     /** 回收已经离开窗口的章任务：对照旧 `loadContent` 的 `else -> textChapter.cancelLayout()`。 */
     private fun recycleReaderChapterPaginationJobs() {
-        val visible = ReadBook.durChapterIndex.let { it - 1..it + 1 }
+        // 滚动模式多保一章前向页：读者往上滑过章界再回来时，下一章不该被整章回收，
+        // 否则窗口里只剩"加载中"占位页，直到真正跨章才重排。
+        val forwardExtra = if (ReadBook.isScroll) 1 else 0
+        val visible = ReadBook.durChapterIndex.let { it - 1..it + 1 + forwardExtra }
         readerChapterPaginationJobs.keys
             .filter { it !in visible }
             .forEach { index ->
@@ -1536,7 +1584,7 @@ class ReadBookController(
             directReaderPageIndex?.let { directReaderPages.getOrNull(it)?.id?.chapterIndex }
         replaceDirectReaderPages(
             ReaderPageNavigator.retainChapterWindow(
-                directReaderPages, ReadBook.durChapterIndex, displayedChapter,
+                directReaderPages, ReadBook.durChapterIndex, displayedChapter, forwardExtra,
             )
         )
         paginatedChapterIdentities.keys.retainAll(visible.toSet())

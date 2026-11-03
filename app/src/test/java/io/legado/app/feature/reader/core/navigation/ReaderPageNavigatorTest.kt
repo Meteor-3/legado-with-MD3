@@ -91,6 +91,13 @@ class ReaderPageNavigatorTest {
     }
 
     @Test
+    fun scrollWindowKeepsOneExtraForwardChapter() {
+        val pages = (0..10).map { page(0, 0, it) }
+        val retained = ReaderPageNavigator.retainChapterWindow(pages, 8, 8, forwardExtra = 1)
+        assertEquals(setOf(7, 8, 9, 10), retained.map { it.id.chapterIndex }.toSet())
+    }
+
+    @Test
     fun loadingHandoffRetainsDisplayedChapterUntilTargetBecomesVisible() {
         val pages = (0..10).map { page(0, 0, it) }
         val retained = ReaderPageNavigator.retainChapterWindow(pages, 8, 4)
