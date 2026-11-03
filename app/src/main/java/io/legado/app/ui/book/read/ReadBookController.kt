@@ -1097,7 +1097,17 @@ class ReadBookController(
                 return@forEach
             }
             if (readerChapterPaginationJobs[chapterIndex]?.job?.isActive == true) return@forEach
-            val candidate = inputs.firstOrNull { it.chapter.index == chapterIndex } ?: return@forEach
+            val candidate = inputs.firstOrNull { it.chapter.index == chapterIndex }
+            if (candidate == null) {
+                // 邻章正文输入还没预取：本地书打开时只装当前章，邻章要等跨章才加载；
+                // 图片章的尺寸探测又慢，占位页会露一瞬。这里提前把输入拉起来
+                // （upContent = false，不移动阅读位置），输入发布后
+                // readerChapterInputChanged 会重发窗口并调度该章排版。
+                if (chapterIndex in ReadBook.durChapterIndex - 1..ReadBook.durChapterIndex + 1) {
+                    ReadBook.loadContent(chapterIndex, upContent = false)
+                }
+                return@forEach
+            }
             startReaderChapterPagination(
                 paginationGeneration = paginationGeneration,
                 candidate = candidate,
