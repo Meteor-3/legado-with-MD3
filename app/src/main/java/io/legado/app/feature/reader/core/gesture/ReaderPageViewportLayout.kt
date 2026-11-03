@@ -46,25 +46,27 @@ class ReaderPageViewportLayout private constructor(
 
         fun scroll(window: ReaderPageWindow, scrollOffsetPx: Float): ReaderPageViewportLayout {
             val current = window.current ?: return ReaderPageViewportLayout(emptyList())
-            return ReaderPageViewportLayout(
-                listOfNotNull(
-                    window.previous?.let {
-                        ReaderPagePlacement(it, scrollOffsetPx - it.scrollExtentPx)
-                    },
-                    ReaderPagePlacement(current, scrollOffsetPx),
-                    window.next?.let {
-                        ReaderPagePlacement(it, scrollOffsetPx + current.scrollExtentPx)
-                    },
-                    window.next?.let { next ->
-                        window.nextPlus?.let { following ->
-                            ReaderPagePlacement(
-                                following,
-                                scrollOffsetPx + current.scrollExtentPx + next.scrollExtentPx,
-                            )
+            val placements = buildList {
+                window.previous?.let {
+                    add(ReaderPagePlacement(it, scrollOffsetPx - it.scrollExtentPx))
+                }
+                add(ReaderPagePlacement(current, scrollOffsetPx))
+                var offsetY = scrollOffsetPx + current.scrollExtentPx
+                window.next?.let { next ->
+                    add(ReaderPagePlacement(next, offsetY))
+                    offsetY += next.scrollExtentPx
+                    window.nextPlus?.let { following ->
+                        add(ReaderPagePlacement(following, offsetY))
+                        offsetY += following.scrollExtentPx
+                        // 短页窗口补出来的页也在视口里，命中测试/选区必须能落到它们身上。
+                        window.followings.forEach { tailPage ->
+                            add(ReaderPagePlacement(tailPage, offsetY))
+                            offsetY += tailPage.scrollExtentPx
                         }
-                    },
-                ),
-            )
+                    }
+                }
+            }
+            return ReaderPageViewportLayout(placements)
         }
     }
 }

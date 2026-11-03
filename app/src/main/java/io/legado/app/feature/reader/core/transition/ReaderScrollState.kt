@@ -35,6 +35,7 @@ object ReaderScrollPolicy {
         previous: ReaderPage? = null,
         next: ReaderPage? = null,
         nextPlus: ReaderPage? = null,
+        followings: List<ReaderPage> = emptyList(),
     ): Float {
         val viewport = (page.contentBottomPx - page.contentTopPx).coerceAtLeast(1f)
         data class Row(val element: ReaderElement, val stackOffset: Float)
@@ -50,9 +51,17 @@ object ReaderScrollPolicy {
             previous?.let { collect(it, -it.scrollExtentPx) }
             collect(page, 0f)
             next?.let { nextPage ->
-                collect(nextPage, page.scrollExtentPx)
+                var shift = page.scrollExtentPx
+                collect(nextPage, shift)
+                shift += nextPage.scrollExtentPx
                 nextPlus?.let { following ->
-                    collect(following, page.scrollExtentPx + nextPage.scrollExtentPx)
+                    collect(following, shift)
+                    shift += following.scrollExtentPx
+                    // 短页窗口补出来的页同样可能露在视口里，步距要按完整可见内容算。
+                    followings.forEach { tailPage ->
+                        collect(tailPage, shift)
+                        shift += tailPage.scrollExtentPx
+                    }
                 }
             }
         }

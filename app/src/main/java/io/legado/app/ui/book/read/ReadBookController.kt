@@ -45,6 +45,7 @@ import io.legado.app.feature.reader.core.selection.ReaderSearchMatcher
 import io.legado.app.feature.reader.core.selection.ReaderSearchRequest
 import io.legado.app.feature.reader.core.selection.ReaderSelection
 import io.legado.app.feature.reader.core.selection.ReaderSelectionMenuAnchor
+import io.legado.app.feature.reader.core.transition.ReaderScrollWindowPolicy
 import io.legado.app.feature.reader.core.transition.ReaderTurnDirection
 import io.legado.app.feature.reader.legacy.LegacyReaderChapterLayoutIdentity
 import io.legado.app.feature.reader.legacy.LegacyReaderChapterPaginationResult
@@ -187,12 +188,8 @@ class ReadBookController(
      * 下一次换窗再抖一遍。
      */
     private fun ensureReaderImageCacheCapacity(window: ReaderPageWindow) {
-        val windowImageBounds = listOfNotNull(
-            window.previous,
-            window.current,
-            window.next,
-            window.nextPlus,
-        ).asSequence()
+        val windowImageBounds = window.windowPages()
+            .asSequence()
             .flatMap { page -> page.elements.asSequence().filterIsInstance<ReaderElement.Image>() }
             // 同一 source 在 ImageProvider 里只解码一份，按 source 去重才不会重复计账
             .distinctBy(ReaderElement.Image::source)
@@ -229,7 +226,7 @@ class ReadBookController(
         readerImageCache.get(readerImageCacheKey(element))?.takeUnless(android.graphics.Bitmap::isRecycled)
 
     private fun activeReaderImageKeys(window: ReaderPageWindow): Set<String> =
-        listOfNotNull(window.previous, window.current, window.next, window.nextPlus)
+        window.windowPages()
             .asSequence()
             .flatMap { page -> page.elements.asSequence().filterIsInstance<ReaderElement.Image>() }
             .map(::readerImageCacheKey)
@@ -307,14 +304,7 @@ class ReadBookController(
      */
     private fun refreshInlineImagesThenReload() {
         val sources = _readerPageWindow.value
-            .let { window ->
-                listOfNotNull(
-                    window.previous,
-                    window.current,
-                    window.next,
-                    window.nextPlus
-                )
-            }
+            .windowPages()
             .asSequence()
             .flatMap { page -> page.elements.asSequence() }
             .filterIsInstance<ReaderElement.Image>()
@@ -990,6 +980,30 @@ class ReadBookController(
                     null
                 }
         }
+        val nextPageDecorated = highlight(nextPage, index + 1)
+            ?: streamingChapter?.let { tailLoadingPage(it) }
+        // 滚动模式：固定四页（previous/current/next/nextPlus）在短页（横版插图、章末残页）
+        // 时会盖不满一屏，窗口底部留下整页空白——那一页不在窗口里，连灰占位都不会画。
+        // 当前页最多滚出自身高度，因此“当前页之后”的页只要覆盖一个内容区高度即可。
+        val currentPage = window.current
+        val followings: List<ReaderPage> = if (ReadBook.isScroll && currentPage != null) {
+            val contentExtentPx = (currentPage.contentBottomPx - currentPage.contentTopPx)
+                .coerceAtLeast(0f)
+            // 用真正会画出来的 next/nextPlus（可能是"加载中"页）计算已覆盖高度。
+            val coveredAfterCurrentPx =
+                (nextPageDecorated?.scrollExtentPx ?: 0f) + (nextPlus?.scrollExtentPx ?: 0f)
+            val candidates = directReaderPages.drop(index + 3)
+            val count = ReaderScrollWindowPolicy.trailingPageCount(
+                contentExtentPx = contentExtentPx,
+                coveredAfterCurrentPx = coveredAfterCurrentPx,
+                followingExtentsPx = candidates.map { it.scrollExtentPx },
+            )
+            candidates.take(count).mapIndexedNotNull { offset, page ->
+                highlight(page, index + 3 + offset)
+            }
+        } else {
+            emptyList()
+        }
         return ReaderPageWindow(
             previous = highlight(previousPage, index - 1)
                 ?: if (streamingChapter != null && window.previous != null) {
@@ -1001,9 +1015,9 @@ class ReadBookController(
                 } else null,
             current = highlight(window.current, index),
             // 本章还没排完时，最后一个成型页之后按旧 `nextPage` 给"加载中"页。
-            next = highlight(nextPage, index + 1)
-                ?: streamingChapter?.let { tailLoadingPage(it) },
+            next = nextPageDecorated,
             nextPlus = nextPlus,
+            followings = followings,
         )
     }
 

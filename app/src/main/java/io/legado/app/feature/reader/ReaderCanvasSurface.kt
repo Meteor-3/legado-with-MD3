@@ -727,6 +727,7 @@ fun ReaderCanvasSurface(
             previous = window.previous,
             next = window.next,
             nextPlus = window.nextPlus,
+            followings = window.followings,
         )
         pageMotionJob?.cancel()
         if (!ReaderGestureSettingsPolicy.animatesScrollPage(latestNoAnimationScrollPage)) {
@@ -2065,12 +2066,7 @@ private fun ScrollPageStack(
     // （对照 shutiao 的组合期 ensureTextLayoutCache + 绘制期兜底）。
     LaunchedEffect(windowProvider()) {
         val pageWindow = windowProvider()
-        val windowPages = listOfNotNull(
-            pageWindow.previous,
-            pageWindow.current,
-            pageWindow.next,
-            pageWindow.nextPlus,
-        )
+        val windowPages = pageWindow.windowPages()
         val windowImages = windowPages.asSequence()
             .flatMap { page -> page.elements.asSequence().filterIsInstance<ReaderElement.Image>() }
             .toSet()
@@ -2157,7 +2153,14 @@ private fun ScrollPageStack(
         window.next?.let { next ->
             drawOne(next, current.scrollExtentPx)
             window.nextPlus?.let { following ->
-                drawOne(following, current.scrollExtentPx + next.scrollExtentPx)
+                var stackOffsetY = current.scrollExtentPx + next.scrollExtentPx
+                drawOne(following, stackOffsetY)
+                stackOffsetY += following.scrollExtentPx
+                // 短页时四页盖不满一屏，按窗口补页继续往下画，避免视口底部整页空白。
+                window.followings.forEach { tailPage ->
+                    drawOne(tailPage, stackOffsetY)
+                    stackOffsetY += tailPage.scrollExtentPx
+                }
             }
         }
     }

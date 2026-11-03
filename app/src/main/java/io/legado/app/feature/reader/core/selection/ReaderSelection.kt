@@ -19,7 +19,7 @@ enum class ReaderSelectionEndpoint {
  * 分页模式实际只有当前页可见。
  */
 fun ReaderPageWindow.selectionPages(): List<ReaderPage> =
-    listOfNotNull(current, next, nextPlus)
+    listOfNotNull(current, next, nextPlus) + followings
 
 @Stable
 data class ReaderSelection(

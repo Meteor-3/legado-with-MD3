@@ -35,8 +35,12 @@ internal class ScrollPageDrawData(val page: ReaderPage) {
  * 页 → 绘制数据缓存。key 取 elements 的**引用身份**：跨页换窗、分钟级页眉时间刷新
  * 都会生成新页实例但复用同一 elements 列表，缓存持续命中；只有真重排（新列表）才
  * 重建。超容量按 LRU 淘汰。
+ *
+ * 默认容量要覆盖滚动窗口上限（previous/current/next/nextPlus + 最多
+ * [io.legado.app.feature.reader.core.transition.ReaderScrollWindowPolicy.MAX_TRAILING_PAGES]
+ * 页补页），否则补页会在 draw 期做主线程序列化。
  */
-internal class ScrollPageDrawCache(capacity: Int = 8) {
+internal class ScrollPageDrawCache(capacity: Int = 12) {
     /**
      * 按 elements 的引用而非内容比较。每次查询都会创建新的 key 包装对象，故必须
      * 显式实现引用相等；Object 默认实现会把包装对象本身作为身份，令缓存永远 miss。

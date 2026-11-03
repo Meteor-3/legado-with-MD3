@@ -411,7 +411,20 @@ data class ReaderPageWindow(
     val next: ReaderPage? = null,
     /** 下下页：滚动视口可露出它；分页模式仅将其作为预热页（对照 shutiao 的四页流）。 */
     val nextPlus: ReaderPage? = null,
-)
+    /**
+     * 滚动模式的前向补页：`nextPlus` 之后仍需绘制的页，按阅读顺序。
+     *
+     * 短页（横版插图、章末残页）叠起来可能盖不满一屏，固定四页会让视口底部整页空白：
+     * 那一页不在窗口里，连灰占位都不会画。补页数量由
+     * [io.legado.app.feature.reader.core.transition.ReaderScrollWindowPolicy] 按页高累加决定。
+     * 分页模式恒为空。
+     */
+    val followings: List<ReaderPage> = emptyList(),
+) {
+    /** 本窗口参与绘制、命中测试与图片预热的全部页（按堆叠顺序）。 */
+    fun windowPages(): List<ReaderPage> =
+        listOfNotNull(previous, current, next, nextPlus) + followings
+}
 
 enum class ReaderTipAlignment { START, CENTER, END }
 

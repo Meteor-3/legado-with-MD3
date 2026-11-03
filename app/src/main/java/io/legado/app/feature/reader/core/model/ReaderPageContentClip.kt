@@ -101,7 +101,7 @@ fun ReaderPage.contentClipRect(backgroundRuns: List<ReaderTextBackgroundRun>): R
  */
 fun ReaderPageWindow.contentClipRect(): ReaderRect? {
     val viewport = current ?: return null
-    val pages = listOfNotNull(previous, viewport, next, nextPlus)
+    val pages = windowPages()
     val pad = pages.maxOf { it.contentClipPadPx }
     var left = viewport.contentLeftPx - pad
     var right = viewport.contentRightPx + pad
